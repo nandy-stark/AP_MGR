@@ -1,0 +1,275 @@
+#!/bin/bash
+
+# ===== CONFIGURATION =====
+BASE_DIR="/integ/release/official"
+CONFIG_FILE="$HOME/.aprc"
+LOG_FILE="$HOME/.ap_log"
+LAST_FILE="$HOME/.ap_last"
+
+# ===== FLAGS =====
+DRY_RUN=0
+CHECK_ONLY=0
+LIST_ONLY=0
+USE_LATEST=0
+USE_LAST=0
+SHOW_HELP=0
+DEBUG=0
+
+# ===== FUN =====
+print_stark_banner() {
+    cat <<'EOF'
+╔═══════════════════════════════════════╗
+║         STARK INDUSTRIES™             ║
+╚═══════════════════════════════════════╝
+EOF
+}
+
+# ===== FUNCTIONS =====
+load_config() {
+    [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+}
+
+set_defaults() {
+    echo "DEFAULT_YEAR=\"$YEAR\"" > "$CONFIG_FILE"
+    echo "DEFAULT_PLATFORM=\"$PLATFORM\"" >> "$CONFIG_FILE"
+    echo "Saved defaults to $CONFIG_FILE"
+    exit 0
+}
+
+clear_cache() {
+    rm -f "$CONFIG_FILE" "$LAST_FILE"
+    echo "Cleared config and cache."
+    exit 0
+}
+
+log_action() {
+    echo "$(date '+%F %T') ap $*" >> "$LOG_FILE"
+    echo "$*" > "$LAST_FILE"
+}
+
+run_last() {
+    if [[ -f "$LAST_FILE" ]]; then
+        echo "Re-running last command:"
+        cat "$LAST_FILE"
+        eval "$(cat "$LAST_FILE")"
+        exit $?
+    else
+        echo "No previous command found."
+        exit 1
+    fi
+}
+
+show_help() {
+    print_stark_banner
+    cat <<EOF
+Usage:
+  ap [<year>] [<revision>] [<rev_number>] [<platform>] [options]
+
+Examples:
+  ap --latest                  # Auto-pick latest year & version
+  ap 24                        # Prompts for version and platform
+  ap 24 R1 3 rhel7-64          # Run specific version
+  ap                           # Prompts for year → version → platform
+  ap --list                    # Show all versions/platforms
+
+Flags:
+  --latest         Use latest version
+  --dry-run        Show the resolved path, don't execute
+  --check          Validate resolved binary
+  --list           Show available versions/platforms
+  --last           Run the last used config
+  --default        Use config file defaults
+  --set-default    Save current config as default
+  --clear-cache    Delete ~/.aprc and ~/.ap_last
+  --config <file>  Use a custom config file
+  --log-path <file>Use a custom log file
+  --debug          Show internal state (debug mode)
+  --help           Show this help message
+EOF
+    exit 0
+}
+
+prompt_choice() {
+    local prompt="$1"
+    shift
+    local options=("$@")
+    if [[ ${#options[@]} -eq 0 ]]; then
+        echo "No options available for: $prompt"
+        exit 1
+    fi
+    echo ""
+    echo "$prompt"
+    PS3="Enter your choice number (e.g. 1): "
+    select opt in "${options[@]}"; do
+        if [[ -n "$opt" ]]; then
+            echo "$opt"
+            return
+        fi
+        if [[ " ${options[*]} " =~ " $REPLY " ]]; then
+            echo "$REPLY"
+            return
+        fi
+        echo "Invalid choice. Enter number or exact name:"
+    done
+}
+
+debug_log() {
+    if [[ $DEBUG -eq 1 ]]; then
+        echo "🛠 DEBUG:"
+        echo "  YEAR     = '$YEAR'"
+        echo "  REV      = '$REV'"
+        echo "  REV_NO   = '$REV_NO'"
+        echo "  VERSION  = '$VERSION'"
+        echo "  PLATFORM = '$PLATFORM'"
+        echo "  BASE_DIR = '$BASE_DIR'"
+        echo "  CONFIG   = '$CONFIG_FILE'"
+        echo "  FULL_PATH= '$FULL_PATH'"
+        echo ""
+    fi
+}
+
+# ===== ARGUMENT PARSING =====
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1; shift ;;
+        --check) CHECK_ONLY=1; shift ;;
+        --list) LIST_ONLY=1; shift ;;
+        --latest) USE_LATEST=1; shift ;;
+        --last) USE_LAST=1; shift ;;
+        --default) load_config; shift ;;
+        --set-default) set_defaults ;;
+        --clear-cache) clear_cache ;;
+        --debug) DEBUG=1; shift ;;
+        --config) CONFIG_FILE="$2"; shift 2 ;;
+        --log-path) LOG_FILE="$2"; shift 2 ;;
+        --help) SHOW_HELP=1; shift ;;
+        *) POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+# ✅ Early exit flags
+[[ $SHOW_HELP -eq 1 ]] && show_help
+[[ $USE_LAST -eq 1 ]] && run_last
+[[ $LIST_ONLY -eq 1 ]] && {
+    echo -e "Year\tVersion\t\tPlatform"
+    for year in $(ls "$BASE_DIR" 2>/dev/null); do
+        for ver in "$BASE_DIR/$year"/AP_*; do
+            [[ -d "$ver" ]] || continue
+            for plat in "$ver"/bin/*; do
+                [[ -d "$plat" ]] && echo -e "$year\t$(basename "$ver")\t$(basename "$plat")"
+            done
+        done
+    done
+    exit 0
+}
+
+# ===== POSITIONAL ARGS =====
+NUM_POS=${#POSITIONAL[@]}
+[[ $NUM_POS -ge 1 && ${POSITIONAL[0]} != --* ]] && YEAR="${POSITIONAL[0]}"
+[[ $NUM_POS -ge 2 && ${POSITIONAL[1]} != --* ]] && REV="${POSITIONAL[1]}"
+[[ $NUM_POS -ge 3 && ${POSITIONAL[2]} != --* ]] && REV_NO="${POSITIONAL[2]}"
+[[ $NUM_POS -ge 4 && ${POSITIONAL[3]} != --* ]] && PLATFORM="${POSITIONAL[3]}"
+
+# ===== First-time welcome =====
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    print_stark_banner
+fi
+
+load_config
+
+# ===== PROMPT FOR YEAR IF MISSING =====
+if [[ -z "$YEAR" ]]; then
+    YEARS=()
+    for dir in "$BASE_DIR"/*; do
+        [[ -d "$dir" ]] && YEARS+=("$(basename "$dir")")
+    done
+
+    if [[ ${#YEARS[@]} -eq 0 ]]; then
+        echo "❌ No available release years found under $BASE_DIR"
+        exit 1
+    fi
+
+    YEAR=$(
+        prompt_choice \
+        "Choose a release year:" \
+        "${YEARS[@]}" </dev/tty | tail -n1
+    )
+    echo "✅ Selected YEAR = $YEAR"
+fi
+
+PLATFORM="${PLATFORM:-$DEFAULT_PLATFORM}"
+
+# ===== LATEST MODE =====
+if [[ $USE_LATEST -eq 1 ]]; then
+    [[ -z "$YEAR" ]] && YEAR=$(ls "$BASE_DIR" | sort -V | tail -n1)
+    VERSION_LIST=()
+    for dir in "$BASE_DIR/$YEAR"/AP_*; do
+        [[ -d "$dir" ]] && VERSION_LIST+=("$(basename "$dir")")
+    done
+    VERSION=$(printf "%s\n" "${VERSION_LIST[@]}" | sort -V | tail -n1)
+fi
+
+# ===== INTERACTIVE PROMPTS =====
+if [[ -n "$YEAR" && -z "$VERSION" ]]; then
+    VERSION_DIRS=()
+    for dir in "$BASE_DIR/$YEAR"/AP_*; do
+        [[ -d "$dir" ]] && VERSION_DIRS+=("$(basename "$dir")")
+    done
+    if [[ ${#VERSION_DIRS[@]} -eq 0 ]]; then
+        echo "No version directories found under $YEAR"
+        exit 1
+    fi
+    VERSION=$(
+        prompt_choice \
+        "Choose a version for year $YEAR (e.g. AP_${YEAR}.R1.2 = Year $YEAR, Revision 1, Patch 2):" \
+        "${VERSION_DIRS[@]}" </dev/tty | tail -n1
+    )
+    echo "✅ Selected VERSION = $VERSION"
+fi
+
+if [[ -z "$VERSION" && -n "$REV" && -n "$REV_NO" ]]; then
+    VERSION="AP_${YEAR//./}.R${REV}.${REV_NO}"
+fi
+
+if [[ -z "$PLATFORM" ]]; then
+    BIN_DIR="$BASE_DIR/$YEAR/$VERSION/bin"
+    if [[ ! -d "$BIN_DIR" ]]; then
+        echo "❌ ERROR: Expected bin directory not found:"
+        echo "   → $BIN_DIR"
+        echo "   (Check YEAR='$YEAR' and VERSION='$VERSION')"
+        debug_log
+        exit 1
+    fi
+    PLATFORMS=()
+    for dir in "$BIN_DIR"/*; do
+        [[ -d "$dir" ]] && PLATFORMS+=("$(basename "$dir")")
+    done
+    PLATFORM=$(
+        prompt_choice \
+        "Choose a platform (e.g. rhel7-64 = Red Hat Enterprise Linux 7, 64-bit):" \
+        "${PLATFORMS[@]}" </dev/tty | tail -n1
+    )
+    echo "✅ Selected PLATFORM = $PLATFORM"
+fi
+
+FULL_PATH="$BASE_DIR/$YEAR/$VERSION/bin/$PLATFORM/AP"
+debug_log
+
+if [[ -z "$YEAR" || -z "$VERSION" || -z "$PLATFORM" ]]; then
+    echo "❌ ERROR: Missing arguments."
+    echo "YEAR='$YEAR', VERSION='$VERSION', PLATFORM='$PLATFORM'"
+    exit 1
+fi
+
+[[ $DRY_RUN -eq 1 ]] && echo "[Dry Run] Would run: $FULL_PATH" && exit 0
+
+if [[ $CHECK_ONLY -eq 1 ]]; then
+    [[ -x "$FULL_PATH" ]] && echo "[Check] OK: $FULL_PATH" && exit 0
+    echo "[Check] FAIL: $FULL_PATH missing or not executable"
+    exit 1
+fi
+
+log_action "$0 $YEAR $REV $REV_NO $PLATFORM"
+exec "$FULL_PATH"
+
