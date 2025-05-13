@@ -5,6 +5,7 @@ SCRIPT_DIR="$HOME/bin/apmgr"
 CONFIG_DIR="$SCRIPT_DIR/.config"
 DEFAULT_CFG="$CONFIG_DIR/default"
 PREV_CFG="$CONFIG_DIR/.prev"
+BASE_DIR="/integ/release/official"
 
 # === Ensure required directories ===
 mkdir -p "$CONFIG_DIR"
@@ -18,6 +19,66 @@ VERSION=AP_2025.1.1
 PLATFORM=rhel9-64
 EOF
 fi
+# === FUNCTIONS ===
+print_stark_banner() {
+    cat <<'EOF'
+╔═══════════════════════════════════════╗
+║         STARK INDUSTRIES™             ║
+╚═══════════════════════════════════════╝
+EOF
+}
+
+show_help() {
+    print_stark_banner
+    cat <<EOF
+Usage:
+  ap [save_name] [-L|-O|-P|-p] [-v] [-l] [-s] [-d]
+
+Examples:
+  ap dev -L         # Use latest version for dev
+  ap prod -P /path/to/AP  # Save manual path for prod
+  ap -p -v          # View last-used config
+  ap -l             # List saved configs
+
+Flags:
+  -L   Use latest version
+  -O   Interactive menu (TODO)
+  -P   Manual path mode
+  -p   Use previous config
+  -v   View resolved path/config
+  -l   List saved configs
+  -s   Save resolved config
+  -d   Delete a config
+
+EOF
+    exit 0
+}
+
+prompt_choice() {
+    local prompt="$1"
+    shift
+    local options=("$@")
+    if [[ ${#options[@]} -eq 0 ]]; then
+        echo "No options available for: $prompt"
+        exit 1
+    fi
+    echo ""
+    echo "$prompt"
+    PS3="Enter your choice number (e.g. 1): "
+    select opt in "${options[@]}"; do
+        if [[ -n "$opt" ]]; then
+            echo "$opt"
+            return
+        fi
+        if [[ " ${options[*]} " =~ " $REPLY " ]]; then
+            echo "$REPLY"
+            return
+        fi
+        echo "Invalid choice. Enter number or exact name:"
+    done
+}
+
+
 # === DEFAULTS ===
 SAVE_NAME="default"
 CUSTOM_PATH=""
@@ -31,6 +92,7 @@ FLAG_DELETE=0
 FLAG_LATEST=0
 FLAG_PATH_MODE=0
 FLAG_PREV=0
+SKIP_RESOLVE=0
 
 # === Parse args ===
 while [[ $# -gt 0 ]]; do
@@ -132,6 +194,7 @@ if [[ $FLAG_PATH_MODE -eq 1 ]]; then
         echo "FULL_PATH=$FULL_PATH"
         exit 0
     fi
+    SKIP_RESOLVE=1
 fi
 
 # === View a config directly ===
@@ -148,6 +211,10 @@ fi
 # Load saved config (unless -p or -P already handled it)
 if [[ -z "$FULL_PATH" && -f "$CONFIG_PATH" ]]; then
     source "$CONFIG_PATH"
+    if [[ -n "$FULL_PATH" && -x "$FULL_PATH" ]]; then
+	    echo "Using Path from saved config: $FULL_PATH"
+	    SKIP_RESOLVE=1
+    fi
 fi
 
 # Handle -L: use LATEST directory if it works, else fallback to latest year
@@ -204,49 +271,82 @@ if [[ $FLAG_LATEST -eq 1 ]]; then
     fi
 fi
 
-# Prompt for YEAR if still missing
-if [[ -z "$YEAR" ]]; then
-    YEARS=()
-    for dir in "$BASE_DIR"/*; do
-        [[ -d "$dir" && "$(basename "$dir")" != "LATEST" ]] && YEARS+=("$(basename "$dir")")
-    done
-
-    [[ ${#YEARS[@]} -eq 0 ]] && echo "❌ No year directories in $BASE_DIR" && exit 1
-
-    YEAR=$(prompt_choice "Select release year:" "${YEARS[@]}" </dev/tty | tail -n1)
-    echo "Selected YEAR: $YEAR"
+if [[ $SKIP_RESOLVE -ne 1 ]]; then
+  # Prompt for YEAR if still missing
+  if [[ -z "$YEAR" ]]; then
+      YEARS=()
+      for dir in "$BASE_DIR"/*; do
+          [[ -d "$dir" && "$(basename "$dir")" != "LATEST" ]] && YEARS+=("$(basename "$dir")")
+      done
+  
+      [[ ${#YEARS[@]} -eq 0 ]] && echo "❌ No year directories in $BASE_DIR" && exit 1
+  
+      YEAR=$(prompt_choice "Select release year:" "${YEARS[@]}" </dev/tty | tail -n1)
+      echo "Selected YEAR: $YEAR"
+  fi
+  
+  # Prompt for VERSION if still missing
+  if [[ -z "$VERSION" ]]; then
+      VERSION_DIRS=()
+      for dir in "$BASE_DIR/$YEAR"/AP_*; do
+          [[ -d "$dir" ]] && VERSION_DIRS+=("$(basename "$dir")")
+      done
+  
+      [[ ${#VERSION_DIRS[@]} -eq 0 ]] && echo "❌ No versions found under $YEAR" && exit 1
+  
+      VERSION=$(prompt_choice "Select version under $YEAR:" "${VERSION_DIRS[@]}" </dev/tty | tail -n1)
+      echo "Selected VERSION: $VERSION"
+  fi
+  
+  # Prompt for PLATFORM if still missing
+  if [[ -z "$PLATFORM" ]]; then
+      BIN_DIR="$BASE_DIR/$YEAR/$VERSION/bin"
+      [[ ! -d "$BIN_DIR" ]] && echo "❌ Bin directory missing: $BIN_DIR" && exit 1
+  
+      PLATFORMS=()
+      for dir in "$BIN_DIR"/*; do
+          [[ -d "$dir" ]] && PLATFORMS+=("$(basename "$dir")")
+      done
+  
+      [[ ${#PLATFORMS[@]} -eq 0 ]] && echo "❌ No platforms found in $BIN_DIR" && exit 1
+  
+      PLATFORM=$(prompt_choice "Select platform:" "${PLATFORMS[@]}" </dev/tty | tail -n1)
+      echo "Selected PLATFORM: $PLATFORM"
+  fi
+  
+  # Final FULL_PATH construction if not already done
+  if [[ -z "$FULL_PATH" ]]; then
+      FULL_PATH="$BASE_DIR/$YEAR/$VERSION/bin/$PLATFORM/AP"
+  fi
 fi
 
-# Prompt for VERSION if still missing
-if [[ -z "$VERSION" ]]; then
-    VERSION_DIRS=()
-    for dir in "$BASE_DIR/$YEAR"/AP_*; do
-        [[ -d "$dir" ]] && VERSION_DIRS+=("$(basename "$dir")")
-    done
-
-    [[ ${#VERSION_DIRS[@]} -eq 0 ]] && echo "❌ No versions found under $YEAR" && exit 1
-
-    VERSION=$(prompt_choice "Select version under $YEAR:" "${VERSION_DIRS[@]}" </dev/tty | tail -n1)
-    echo "Selected VERSION: $VERSION"
+# Check if FULL_PATH exists and is executable
+if [[ ! -x "$FULL_PATH" ]]; then
+    echo "❌ ERROR: Resolved binary is not executable:"
+    echo "   → $FULL_PATH"
+    exit 1
 fi
 
-# Prompt for PLATFORM if still missing
-if [[ -z "$PLATFORM" ]]; then
-    BIN_DIR="$BASE_DIR/$YEAR/$VERSION/bin"
-    [[ ! -d "$BIN_DIR" ]] && echo "❌ Bin directory missing: $BIN_DIR" && exit 1
-
-    PLATFORMS=()
-    for dir in "$BIN_DIR"/*; do
-        [[ -d "$dir" ]] && PLATFORMS+=("$(basename "$dir")")
-    done
-
-    [[ ${#PLATFORMS[@]} -eq 0 ]] && echo "❌ No platforms found in $BIN_DIR" && exit 1
-
-    PLATFORM=$(prompt_choice "Select platform:" "${PLATFORMS[@]}" </dev/tty | tail -n1)
-    echo "Selected PLATFORM: $PLATFORM"
+# If we're just viewing (-v), print resolved info and exit
+if [[ $FLAG_VIEW -eq 1 ]]; then
+    echo "[View Mode] Resolved configuration:"
+    echo "SAVE_NAME = $SAVE_NAME"
+    echo "YEAR      = $YEAR"
+    echo "VERSION   = $VERSION"
+    echo "PLATFORM  = $PLATFORM"
+    echo "FULL_PATH = $FULL_PATH"
+    exit 0
 fi
 
-# Final FULL_PATH construction if not already done
-if [[ -z "$FULL_PATH" ]]; then
-    FULL_PATH="$BASE_DIR/$YEAR/$VERSION/bin/$PLATFORM/AP"
-fi
+# Save to .prev ONLY if we're going to run it
+cat > "$PREV_CFG" <<EOF
+YEAR=$YEAR
+VERSION=$VERSION
+PLATFORM=$PLATFORM
+FULL_PATH=$FULL_PATH
+EOF
+echo "Saved to .prev"
+
+# Execute the program
+echo "🚀 Launching: $FULL_PATH"
+exec "$FULL_PATH"
