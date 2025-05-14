@@ -1,8 +1,0 @@
-Starting program: /integ/release/official/LATEST/AP_2025.1.1/bin/rhel9-64/AP
-Aprisa RTL2GDS Version: 2025.1.1:rhel9-64.2503.2806.3517 PDT
-Machine: orw-nanyermf-rk (VM)  PID: 84679  OS/Kernel: 9.5/5.14.0-503.34.1.el9_5.x86_64  Glibc: 2.34 stable
-  nCPUs: 8, nPhyCores: 8, nCores: 8, CPUSpeed: 2.79GHz, ActiveMIPS: 15868, PhysMem(free/total): 12212/15735M, Cache Size: 512K
-  CPU Model: AMD EPYC 7543 32-Core Processor
-  load average: 0.09, 0.17, 0.12
-Date   : Tue May 13 15:17:09 2025
-Number of phyCore Used = 8 (maximum 16 threads)
