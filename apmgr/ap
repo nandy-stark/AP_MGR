@@ -33,12 +33,16 @@ show_help() {
     cat <<EOF
 Usage:
   ap [save_name] [-L|-O|-P <path>|-p] [-v] [-l] [-s | -d]
+  Invoke Aprisa and save versions by name.
 
 Examples:
   ap dev -L         # Use latest version for dev
   ap prod -P /path/to/AP  # Save manual path for prod
   ap -p -v          # View last-used config
   ap -l             # List saved configs
+
+  The [save_name] argument could be the name of a client project
+  or company for ease of use.
 
 Flags:
   -L   Use latest version
