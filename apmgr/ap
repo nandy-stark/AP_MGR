@@ -32,7 +32,7 @@ show_help() {
     print_stark_banner
     cat <<EOF
 Usage:
-  ap [save_name] [-L|-O|-P|-p] [-v] [-l] [-s] [-d]
+  ap [save_name] [-L|-O|-P <path>|-p] [-v] [-l] [-s | -d]
 
 Examples:
   ap dev -L         # Use latest version for dev
