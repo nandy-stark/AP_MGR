@@ -36,22 +36,25 @@ Usage:
   Invoke Aprisa and save versions by name.
 
 Examples:
-  ap dev -L         # Use latest version for dev
-  ap prod -P /path/to/AP  # Save manual path for prod
-  ap -p -v          # View last-used config
-  ap -l             # List saved configs
+  ap dev                    # Run Aprisa with saved path named dev
+  ap prod -s -P /path/to/AP # Save manual path for prod
+  ap -p -v                  # View last-used config
+  ap -l                     # List saved configs
 
   The [save_name] argument could be the name of a client project
   or company for ease of use.
 
 Flags:
+ Invocation:
   -L   Use latest version
   -O   Interactive menu (TODO)
   -P   Manual path mode
   -p   Use previous config
-  -v   View resolved path/config
-  -l   List saved configs
-  -s   Save resolved config
+ Misc:
+  -v   Show path that would be used
+       Does not invoke Aprisa itself, only prints the path
+  -l   List saved configs from $CONFIG_DIR
+  -s   Saves [save_name] to $CONFIG_DIR
   -d   Delete a config
 
 EOF
